@@ -98,7 +98,7 @@ def ensure_admin(conn, password):
     row = conn.execute("select id, password_hash from tf_students where student_no = 'admin'").fetchone()
     if row is None:
         conn.execute("""insert into tf_students (student_no, name, main_role, password_hash, is_admin)
-                        values ('admin', '관리자', '관리자', %s, true)""", (_hash(password, 12),))
+                        values ('admin', '관리자', null, %s, true)""", (_hash(password, 12),))
     elif not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
         conn.execute("update tf_students set password_hash = %s where id = %s", (_hash(password, 12), row["id"]))
 

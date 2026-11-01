@@ -4,10 +4,11 @@ create table if not exists tf_students (
     id            bigserial primary key,
     student_no    text not null unique,
     name          text not null,
-    main_role     text not null check (main_role in
-                    ('기획자', '웹 프로그래머', '프론트엔드 디자이너', '테스터', '보고서 작성자', '발표자', '관리자')),
+    main_role     text check (main_role in             -- 6개 역할 밖의 값을 막음. 관리자는 역할이 없어 비워 둠
+                    ('기획자', '웹 프로그래머', '프론트엔드 디자이너', '테스터', '보고서 작성자', '발표자')),
     password_hash text not null,
-    is_admin      boolean not null default false
+    is_admin      boolean not null default false,
+    constraint tf_students_role_required check (is_admin or main_role is not null)
 );
 
 create table if not exists tf_student_sub_roles (
@@ -69,3 +70,13 @@ create table if not exists tf_ai_logs (
     detail     text,
     elapsed_s  numeric(6, 1)
 );
+
+-- 2026-11-02 고침: 처음에는 관리자 행 때문에 main_role 에 '관리자'를 7번째 값으로 허용했음.
+-- 공고 5절(6개 역할 밖의 값을 막음)에 맞추려고, 이미 만든 DB에 아래 SQL을 실행해 관리자의 main_role 을 비움.
+-- 위의 create table 문은 이 변경을 반영한 최종 모양임.
+-- alter table tf_students drop constraint tf_students_main_role_check;
+-- alter table tf_students alter column main_role drop not null;
+-- update tf_students set main_role = null where is_admin;
+-- alter table tf_students add constraint tf_students_main_role_check check (main_role in
+--     ('기획자', '웹 프로그래머', '프론트엔드 디자이너', '테스터', '보고서 작성자', '발표자'));
+-- alter table tf_students add constraint tf_students_role_required check (is_admin or main_role is not null);

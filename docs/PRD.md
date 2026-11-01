@@ -49,4 +49,4 @@
 ## 8. 기술
 - Python, Streamlit(Community Cloud 배포), Supabase Postgres(`psycopg`), `bcrypt` 비밀번호 해시, OpenRouter API
 - 키(`OPENROUTER_API_KEY`, `DATABASE_URL`, `ADMIN_PASSWORD`)는 `.env`와 Streamlit Secrets에만 둔다.
-- 화면 요소의 Streamlit `key`는 공고 2.7절 표를 그대로 따른다.
+- 화면 요소의 Streamlit `key`는 공고 표를 그대로 따른다.
