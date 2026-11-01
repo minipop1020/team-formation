@@ -11,6 +11,24 @@ st.set_page_config(page_title="팀 편성", page_icon="👥", layout="wide")
 
 REFRESH_SECONDS = 3
 
+# 크롬 자동 번역이 글자를 바꿔치기하면 3초마다 다시 그린 숫자(찬성 수 등)가 화면에 반영되지 않음.
+# 페이지를 한국어로 표시하고 번역하지 말라고 알려 준다.
+NO_TRANSLATE = """
+<script>
+const root = window.parent.document.documentElement;
+root.setAttribute("lang", "ko");
+root.setAttribute("translate", "no");
+root.classList.add("notranslate");
+const head = window.parent.document.head;
+if (!head.querySelector('meta[name="google"]')) {
+  const meta = window.parent.document.createElement("meta");
+  meta.name = "google";
+  meta.content = "notranslate";
+  head.appendChild(meta);
+}
+</script>
+"""
+
 
 # ---------- 공통 ----------
 
@@ -312,6 +330,7 @@ def admin_page():
 # ---------- 시작 ----------
 
 def main():
+    st.html(NO_TRANSLATE, unsafe_allow_javascript=True)
     admin_password = get_secret("ADMIN_PASSWORD")
     if not admin_password or not get_secret("DATABASE_URL"):
         st.error("비밀 값(DATABASE_URL, ADMIN_PASSWORD)이 설정되지 않음")
@@ -329,8 +348,8 @@ def main():
     top1, top2 = st.columns([5, 1])
     with top1:
         with st.container(key="whoami"):
-            role = "관리자" if user["is_admin"] else "학생"
-            st.markdown(f"**{user['name']}** ({user['no']}) · {role}로 로그인함")
+            role = "관리자로" if user["is_admin"] else "학생으로"
+            st.markdown(f"**{user['name']}** ({user['no']}) · {role} 로그인함")
     top2.button("로그아웃", key="logout", on_click=on_logout)
     if user["is_admin"]:
         admin_page()
