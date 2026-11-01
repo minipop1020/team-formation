@@ -49,6 +49,7 @@ def load_state(conn):
     member_team = {}
     for m in data["members"]:
         team_by_id[m["team_id"]]["member_ids"].append(m["student_id"])
+        team_by_id[m["team_id"]].setdefault("slots", []).append(m["slot_no"])
         member_team[m["student_id"]] = team_by_id[m["team_id"]]["no"]
     pending = [dict(p, votes={}) for p in data["pending"]]
     by_app = {p["id"]: p for p in pending}
@@ -173,11 +174,17 @@ def reset_roster(data, team_count):
 
 # ---------- 지원과 투표 ----------
 
-def _insert_member(conn, team_id, student_id):
-    used = {r["slot_no"] for r in conn.execute("select slot_no from tf_members where team_id = %s", (team_id,))}
-    slot = min(set(range(1, 5)) - used)
-    conn.execute("insert into tf_members (team_id, slot_no, student_id) values (%s, %s, %s)",
-                 (team_id, slot, student_id))
+def _free_slots(team):
+    """팀의 빈 자리 번호(1~4). 쓰기 동작은 잠금 안에서 읽은 상태로 계산하므로 그사이 바뀌지 않음."""
+    return sorted(set(range(1, 5)) - set(team.get("slots", [])))
+
+
+def _insert_members(conn, rows):
+    """[(team_id, slot_no, student_id)] 를 한 번에 넣는다. DB 왕복을 한 번으로 줄임."""
+    conn.execute("""
+        insert into tf_members (team_id, slot_no, student_id)
+        select * from unnest(%s::bigint[], %s::int[], %s::bigint[])
+    """, ([r[0] for r in rows], [r[1] for r in rows], [r[2] for r in rows]))
 
 
 def apply(student_id, team_no):
@@ -198,7 +205,7 @@ def apply(student_id, team_no):
         if reason:
             return f"막힘: {reason}"
         if not members:
-            _insert_member(conn, team["id"], student_id)
+            _insert_members(conn, [(team["id"], _free_slots(team)[0], student_id)])
             conn.execute("""insert into tf_applications (team_id, student_id, status, reason, decided_at)
                             values (%s, %s, '승인', '빈 팀', now())""", (team["id"], student_id))
             return f"승인: {team['name']}에 들어감(빈 팀이라 바로 승인)"
@@ -245,7 +252,7 @@ def vote(voter_id, app_id, yes):
         if reason:
             _decide(conn, app_id, "거절", f"승인 직전 검사: {reason}")
             return f"거절: 승인 직전 검사에서 규칙을 어김({reason})"
-        _insert_member(conn, app["team_id"], app["student_id"])
+        _insert_members(conn, [(app["team_id"], _free_slots(team)[0], app["student_id"])])
         _decide(conn, app_id, "승인", "팀원 모두 찬성")
         return f"승인: {applicant['name']}이(가) {app['team_name']}의 팀원이 됨"
 
@@ -277,9 +284,11 @@ def confirm_plan(plan):
         if errors:
             return "막힘: 배정안이 지금 상태와 맞지 않음(" + "; ".join(errors) + ")"
         ids = {s["student_no"]: sid for sid, s in state["students"].items()}
-        team_ids = {t["no"]: t["id"] for t in state["teams"]}
-        for student_no, team_no in plan:
-            _insert_member(conn, team_ids[team_no], ids[student_no])
+        teams = {t["no"]: t for t in state["teams"]}
+        free = {no: _free_slots(t) for no, t in teams.items()}
+        rows = [(teams[team_no]["id"], free[team_no].pop(0), ids[student_no]) for student_no, team_no in plan]
+        if rows:
+            _insert_members(conn, rows)
         conn.execute("""insert into tf_settings (key, value) values ('confirmed', '1')
                         on conflict (key) do update set value = '1'""")
         return f"승인: 배정안을 확정함({len(plan)}명 배정)"
