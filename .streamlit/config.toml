@@ -1,0 +1,4 @@
+[client]
+# 오류가 나도 화면에 자세한 내용(DB 주소 등)을 보이지 않음
+showErrorDetails = "none"
+toolbarMode = "viewer"
