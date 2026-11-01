@@ -262,12 +262,13 @@ def run_assign(box):
         waiting = st.empty()
         lines = st.empty()
 
+    # 모델 이름은 코드 모양(`…`)으로 보여 줌. 그냥 쓰면 ':free:' 가 🆓 이모지로 바뀜
     def on_wait(attempt, model, elapsed):
-        waiting.info(f"⏳ AI가 생각하는 중 · {attempt}차 모델 **{model}** 의 응답을 기다리는 중 "
+        waiting.info(f"⏳ AI가 생각하는 중 · {attempt}차 모델 `{model}` 의 응답을 기다리는 중 "
                      f"({elapsed:.0f}초 / {ai.TOTAL_TIMEOUT}초)")
 
     def on_attempt(attempt, model, outcome, detail, elapsed):
-        text = f"{attempt}차 모델 {model}: {outcome} ({elapsed:.1f}초)"
+        text = f"{attempt}차 모델 `{model}`: {outcome} ({elapsed:.1f}초)"
         if detail:
             text += f" — {detail[:200]}"
         log.append(text)
@@ -275,7 +276,9 @@ def run_assign(box):
         service.log_ai(attempt, model, outcome, detail, round(elapsed, 1))
 
     plan, source = ai.assign(teams, unassigned, get_secret("OPENROUTER_API_KEY"), on_wait, on_attempt)
+    # 진행 중에 보여 준 기록은 지움. 끝난 뒤 admin_page 가 assign_log 로 한 번만 다시 그림
     waiting.empty()
+    lines.empty()
     st.session_state.plan = plan
     st.session_state.plan_source = source
     st.session_state.assign_log = log + [f"검사 5가지를 통과한 배정안: {source}"]
