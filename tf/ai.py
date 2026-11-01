@@ -8,11 +8,17 @@ import requests
 
 from tf.rules import solve, validate_plan
 
+# 2026-11-02 어려움 시나리오 마감 뒤 상태로 시험해 고름
+# (1차 37초 통과, 2차 74초 통과. 3차 gemma 는 시험 때 429 였으나 생각 단계가 없어 실패해도 바로 넘어감)
 MODELS = [
     "nvidia/nemotron-3.5-super-vl:free",
-    "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "cohere/north-mini-code:free",
+    "dots-studio/dots-3-note-preview:free",
+    "google/gemma-4-31b-it:free",
 ]
+# 생각하는 모델은 답 전에 수천 토큰을 씀. 6000 이면 생각만 하다 빈 응답이 났음.
+# 1차 모델은 초당 약 180토큰이라 120초면 약 21,700토큰을 씀. 그만큼은 다 쓸 수 있게 하고,
+# 3차 gemma 의 최대 출력(32,768)은 넘지 않게 함
+MAX_TOKENS = 24000
 TOTAL_TIMEOUT = 120  # 모델 하나를 부른 때부터 응답을 받을 때까지의 전체 대기 시간(초)
 URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -52,7 +58,7 @@ def call_model(model, messages, api_key):
         json={
             "model": model,
             "messages": messages,
-            "max_tokens": 6000,
+            "max_tokens": MAX_TOKENS,
             "temperature": 0.2,
             "reasoning": {"effort": "low"},
         },
@@ -65,8 +71,15 @@ def call_model(model, messages, api_key):
             msg = resp.text[:200]
         raise AIFailure(f"HTTP {resp.status_code} {msg}".strip())
     try:
-        content = resp.json()["choices"][0]["message"].get("content") or ""
-    except (ValueError, KeyError, IndexError):
+        data = resp.json()
+    except ValueError:
+        raise AIFailure("응답이 JSON이 아님")
+    if "error" in data:
+        # 200 응답 안에 제공자 오류가 담겨 오기도 함
+        raise AIFailure(f"제공자 오류 {data['error'].get('message', '')}".strip())
+    try:
+        content = data["choices"][0]["message"].get("content") or ""
+    except (KeyError, IndexError, AttributeError):
         raise AIFailure("응답 형식이 올바르지 않음")
     if not content.strip():
         raise AIFailure("빈 응답")
