@@ -1,6 +1,7 @@
 """앱의 동작(로그인, 명단 올리기, 지원, 투표, 마감, 확정). 결과 안내는 승인/대기/거절/막힘 가운데 하나로 시작한다."""
 import csv
 import io
+from concurrent.futures import ThreadPoolExecutor
 
 import bcrypt
 
@@ -140,23 +141,33 @@ def reset_roster(data, team_count):
         return f"막힘: 명단 CSV를 읽지 못함({e})"
     if not 1 <= team_count <= 20:
         return "막힘: 팀 수는 1~20 이어야 함"
-    hashes = [_hash(STUDENT_PASSWORD) for _ in students]
+    # 해시 하나에 약 0.12초. 16명을 차례로 하면 2초라 동시에 만든다(bcrypt는 스레드에서 함께 돎)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        hashes = list(pool.map(lambda _: _hash(STUDENT_PASSWORD), students))
+    sub_rows = [(s.no, role) for s in students for role in s.subs]
+    # DB가 멀어 왕복 한 번에 0.3~0.7초가 걸리므로, 한 명씩 넣지 않고 표마다 한 번에 넣는다
     with transaction(lock=True) as conn:
-        conn.execute("delete from tf_votes")
-        conn.execute("delete from tf_applications")
-        conn.execute("delete from tf_members")
-        conn.execute("delete from tf_teams")
-        conn.execute("delete from tf_students where not is_admin")
-        conn.execute("delete from tf_settings where key in ('closed', 'confirmed')")
-        with conn.cursor() as cur:
-            cur.executemany("insert into tf_teams (no, name) values (%s, %s)",
-                            [(n, f"팀{n}") for n in range(1, team_count + 1)])
-            for s, h in zip(students, hashes):
-                cur.execute("""insert into tf_students (student_no, name, main_role, password_hash)
-                               values (%s, %s, %s, %s) returning id""", (s.no, s.name, s.main, h))
-                sid = cur.fetchone()["id"]
-                for role in s.subs:
-                    cur.execute("insert into tf_student_sub_roles (student_id, role) values (%s, %s)", (sid, role))
+        conn.execute("""
+            delete from tf_votes;
+            delete from tf_applications;
+            delete from tf_members;
+            delete from tf_teams;
+            delete from tf_students where not is_admin;
+            delete from tf_settings where key in ('closed', 'confirmed');
+        """)
+        conn.execute("insert into tf_teams (no, name) select n, '팀' || n from generate_series(1, %s) as n",
+                     (team_count,))
+        conn.execute("""
+            insert into tf_students (student_no, name, main_role, password_hash)
+            select * from unnest(%s::text[], %s::text[], %s::text[], %s::text[])
+        """, ([s.no for s in students], [s.name for s in students], [s.main for s in students], hashes))
+        if sub_rows:
+            conn.execute("""
+                insert into tf_student_sub_roles (student_id, role)
+                select s.id, r.role
+                from unnest(%s::text[], %s::text[]) as r(student_no, role)
+                join tf_students s on s.student_no = r.student_no
+            """, ([no for no, _ in sub_rows], [role for _, role in sub_rows]))
     return f"승인: 학생 {len(students)}명과 팀 {team_count}개로 처음 상태를 만듦"
 
 
