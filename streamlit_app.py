@@ -89,7 +89,7 @@ def on_login():
 
 
 def on_logout():
-    for key in ("user", "result", "plan", "plan_source", "assign_log"):
+    for key in ("user", "result", "plan", "plan_source", "assign_log", "last_action"):
         st.session_state.pop(key, None)
 
 
@@ -105,10 +105,12 @@ def login_page():
 # ---------- 학생 화면 ----------
 
 def on_apply(student_id, team_no):
+    st.session_state.last_action = "apply"
     set_result(safe(service.apply, student_id, team_no))
 
 
 def on_vote(voter_id, app_id, yes):
+    st.session_state.last_action = "vote"
     set_result(safe(service.vote, voter_id, app_id, yes))
 
 
@@ -127,6 +129,10 @@ def student_view(uid):
     my_team = state["member_team"].get(uid)
     my_pending = next((p for p in state["pending"] if p["student_id"] == uid), None)
     latest = state["latest_app"].get(uid)
+    # 위 안내는 단추를 누른 때의 결과. 대기였던 지원의 결과가 나중에 나오면 지금 상태를 덧붙임
+    if (st.session_state.get("last_action") == "apply" and str(st.session_state.get("result", "")).startswith("대기")
+            and latest and latest["status"] != "대기"):
+        st.caption(f"→ 그 뒤 바뀐 상태: 팀{latest['team_no']} 지원이 **{latest['status']}**됨 ({latest['reason'] or ''})")
     if my_team:
         st.markdown(f"#### 내 팀: 팀{my_team}")
     else:
@@ -167,6 +173,14 @@ def student_view(uid):
                               on_click=on_vote, args=(uid, app["id"], True))
                     c2.button("거부", key=f"vote_no_{applicant['student_no']}",
                               on_click=on_vote, args=(uid, app["id"], False))
+
+    st.markdown("#### 나의 지원 내역")
+    mine = [a for a in state["applications"] if a["student_id"] == uid]
+    if mine:
+        st.dataframe([{"시각": a["at"], "팀": f"팀{a['team_no']}", "상태": a["status"], "까닭": a["reason"] or ""}
+                      for a in reversed(mine)], hide_index=True)
+    else:
+        st.caption("아직 지원한 적 없음. 막힌 지원은 접수되지 않아 여기에 남지 않음")
 
 
 # ---------- 관리자 화면 ----------
@@ -232,9 +246,17 @@ def admin_live():
                 st.markdown("- " + describe(row))
         else:
             st.caption("없음")
+    apps = state["applications"]
+    with st.expander(f"전체 지원 기록 ({len(apps)}건, 최근 것이 위)"):
+        if apps:
+            st.dataframe([{"시각": a["at"], "학생": state["students"][a["student_id"]]["name"],
+                           "팀": f"팀{a['team_no']}", "상태": a["status"], "까닭": a["reason"] or ""}
+                          for a in reversed(apps)], hide_index=True)
+        else:
+            st.caption("아직 지원이 없음. 막힌 지원은 접수되지 않아 기록되지 않음")
 
 
-def run_assign(box):
+def run_assign(box, use_ai):
     clear_plan()
     try:
         state = load_state()
@@ -246,7 +268,8 @@ def run_assign(box):
         return
     teams = service.teams_as_students(state)
     unassigned = service.unassigned_students(state)
-    if solve(teams, unassigned) is None:
+    own_plan = solve(teams, unassigned)
+    if own_plan is None:
         st.session_state.assign_log = ["규칙을 지키는 배정이 없음"] + infeasible_reason(teams, unassigned)
         set_result("막힘: 규칙을 지키는 배정이 없음")
         return
@@ -255,6 +278,14 @@ def run_assign(box):
         st.session_state.plan_source = "팀이 없는 학생이 없음"
         st.session_state.assign_log = ["팀이 없는 학생이 없어 AI를 부르지 않음"]
         set_result("승인: 배정할 학생이 없음. 지금 구성을 확정할 수 있음")
+        return
+    if not use_ai:
+        # 연습할 때 무료 AI 호출 횟수를 아끼려고 AI 없이 앱이 바로 배정함
+        source = "AI를 끄고 앱이 모든 경우를 따져 찾은 배정안"
+        st.session_state.plan = own_plan
+        st.session_state.plan_source = source
+        st.session_state.assign_log = [f"검사 5가지를 통과한 배정안: {source}"]
+        set_result(f"승인: 배정안을 만듦({source}). 확인하고 확정해 주세요")
         return
 
     log = []
@@ -301,10 +332,12 @@ def admin_page():
     st.button("모집 마감", key="admin_close", on_click=on_close)
 
     st.subheader("4. AI 배정과 확정")
+    use_ai = st.toggle("AI에게 배정 맡기기 (끄면 AI를 부르지 않고 앱이 바로 배정해 무료 호출을 아낌)",
+                       value=True, key="admin_use_ai")
     clicked = st.button("AI 배정", key="admin_assign")
     box = st.container(key="assign_status", border=True)
     if clicked:
-        run_assign(box)
+        run_assign(box, use_ai)
     with box:
         log = st.session_state.get("assign_log")
         if log:
@@ -325,6 +358,19 @@ def admin_page():
             "배정된 팀": f"팀{team_no}",
         } for no, team_no in sorted(plan, key=lambda p: (p[1], p[0])) if no in by_no])
     st.button("배정안 확정", key="admin_confirm", on_click=on_confirm, disabled=plan is None, type="primary")
+
+    with st.expander("AI 호출 기록 (최근 20번, 한국 시각)"):
+        try:
+            logs = service.recent_ai_logs(20)
+        except Exception:
+            logs = None
+            st.caption("기록을 읽지 못함")
+        if logs:
+            st.dataframe([{"시각": r["at"], "차수": f"{r['attempt']}차", "모델": r["model"], "결과": r["outcome"],
+                           "걸린 시간(초)": float(r["elapsed_s"]), "자세한 내용": r["detail"] or ""} for r in logs],
+                         hide_index=True)
+        elif logs is not None:
+            st.caption("아직 AI를 부른 적 없음")
 
     with result_box.container():
         show_result()

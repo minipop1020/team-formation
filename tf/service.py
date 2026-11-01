@@ -33,6 +33,10 @@ select json_build_object(
   'votes', (select coalesce(json_agg(v), '[]') from (
       select v.application_id, v.voter_id, v.vote from tf_votes v
       join tf_applications a on a.id = v.application_id where a.status = '대기') v),
+  'applications', (select coalesce(json_agg(a order by a.created_at, a.id), '[]') from (
+      select a.id, a.student_id, t.no as team_no, a.status, a.reason, a.created_at,
+             to_char(a.created_at at time zone 'Asia/Seoul', 'HH24:MI:SS') as at
+      from tf_applications a join tf_teams t on t.id = a.team_id) a),
   'latest', (select coalesce(json_agg(l), '[]') from (
       select distinct on (a.student_id) a.student_id, a.status, a.reason, t.no as team_no
       from tf_applications a join tf_teams t on t.id = a.team_id
@@ -64,6 +68,7 @@ def load_state(conn):
         "member_team": member_team,
         "pending": pending,
         "latest_app": {r["student_id"]: r for r in latest},
+        "applications": data["applications"],   # 모든 지원(승인, 대기, 거절), 지원한 순서
         "closed": settings.get("closed") == "1",
         "confirmed": settings.get("confirmed") == "1",
     }
@@ -292,6 +297,16 @@ def confirm_plan(plan):
         conn.execute("""insert into tf_settings (key, value) values ('confirmed', '1')
                         on conflict (key) do update set value = '1'""")
         return f"승인: 배정안을 확정함({len(plan)}명 배정)"
+
+
+def recent_ai_logs(limit=20):
+    """최근 AI 호출 기록(한국 시각). README 5항의 실패 사례 근거로 쓴다."""
+    with transaction() as conn:
+        return conn.execute("""
+            select to_char(created_at at time zone 'Asia/Seoul', 'MM-DD HH24:MI:SS') as at,
+                   attempt, model, outcome, elapsed_s, detail
+            from tf_ai_logs order by id desc limit %s
+        """, (limit,)).fetchall()
 
 
 def log_ai(attempt, model, outcome, detail, elapsed):
