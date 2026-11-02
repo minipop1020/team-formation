@@ -1,0 +1,30 @@
+# Supabase 무료 프로젝트는 1주일 동안 DB 요청이 적으면 일시정지됨(공고 4.4절).
+# 외부 예약 서비스(GitHub Actions)로 매일 DB에 질의를 한 번 보내 일시정지를 막는다(공고 3장 어려운 해결).
+# DB 주소는 저장소의 Secrets(DATABASE_URL)에 두고, 출력하지 않는다.
+name: keep-db-awake
+
+on:
+  schedule:
+    - cron: "0 0 * * *"      # 매일 00:00 UTC = 한국 시각 오전 9시
+  workflow_dispatch:          # 손으로도 실행할 수 있게 함
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "psycopg[binary]"
+      - name: DB에 질의 한 번
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'EOF'
+          import os
+          import psycopg
+          with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=20, prepare_threshold=None) as conn:
+              n = conn.execute("select count(*) from tf_students").fetchone()[0]
+          print("DB 질의 성공: tf_students", n, "행")
+          EOF

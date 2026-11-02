@@ -3,7 +3,7 @@
 학생들이 팀 프로젝트를 위한 팀을 스스로 편성하는 웹 앱. 지원과 팀원 투표로 팀을 만들고, 모집 마감 뒤 팀이 없는 학생은 AI가 배정안을 내며, 앱이 배정안을 규칙으로 검사한다.
 
 ## 1. 배포 주소
-(배포한 뒤 적기)
+https://minipop-team-formation.streamlit.app
 
 ## 2. PRD와 구현 계획의 위치
 - PRD: [docs/PRD.md](docs/PRD.md)
@@ -19,7 +19,7 @@
 | AI 응답이 늦을 때 | 어려운 해결 | 모델을 부른 때부터 전체 대기 시간을 재서 120초가 되면 끊고 다음 모델로 넘어감(`tf/ai.py` 의 `call_with_deadline`) |
 | 3차 모델까지 실패 | 어려운 해결 | 배정안 검사 5가지를 모두 통과하는 배정을 모든 경우를 따져 찾음(`tf/rules.py` 의 `solve`) |
 | AI 대기 중 화면 | 어려운 해결 | "AI가 생각하는 중 · ○차 모델 … 의 응답을 기다리는 중 (경과 초 / 120초)"를 보여 줌 |
-| DB(Supabase)가 일시정지되지 않게 | 어려운 해결 | (만든 뒤 적기) |
+| DB(Supabase)가 일시정지되지 않게 | 어려운 해결 | 외부 예약 서비스(GitHub Actions)로 매일 한국 시각 오전 9시에 DB에 질의를 한 번 보냄(`.github/workflows/keep-db-awake.yml`). DB 주소는 저장소의 Secrets에 둠 |
 
 ## 4. 쓴 모델 3개
 - 1차 `nvidia/nemotron-3.5-super-vl:free`
